@@ -4,8 +4,8 @@ echo     MTG Marketplace - Push Updates
 echo ========================================
 echo.
 
-:: Add all changes
-git add .
+:: Add only modified tracked files
+git add -u
 
 :: Show what's being committed
 echo Files to be committed:

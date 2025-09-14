@@ -1,574 +1,529 @@
-import React, { useState } from 'react';
-import { 
-  FileUp, Loader, Info, Download, ChevronDown, 
-  Shield, Package, FileText, Database, Check
-} from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Upload, Search, AlertCircle, CheckCircle, Package, DollarSign, FileText, Download } from 'lucide-react';
+import Papa from 'papaparse';
 
-const BulkImporter = ({ onImportComplete, showNotification }) => {
-  const [importMethod, setImportMethod] = useState('text');
-  const [selectedFormat, setSelectedFormat] = useState('generic');
-  const [bulkText, setBulkText] = useState('');
-  const [csvFile, setCsvFile] = useState(null);
-  const [importing, setImporting] = useState(false);
-  const [showFormatHelp, setShowFormatHelp] = useState(false);
-  
-  const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const BulkImport = ({ onClose, onImportComplete }) => {
+  const [importedCards, setImportedCards] = useState([]);
+  const [importStatus, setImportStatus] = useState('');
+  const [selectedFormat, setSelectedFormat] = useState('auto');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [suggestedPrice, setSuggestedPrice] = useState('10.00');
+  const [defaultCondition, setDefaultCondition] = useState('NM');
+  const [searchResults, setSearchResults] = useState({});
+  const [failedCards, setFailedCards] = useState([]);
+  const [debugInfo, setDebugInfo] = useState(null);
 
-  // Database format definitions
-  const databaseFormats = {
+  const csvFormats = {
+    auto: {
+      name: 'Auto-Detect',
+      description: 'Automatically detect CSV format'
+    },
     dragonshield: {
       name: 'DragonShield',
-      icon: '🛡️',
-      description: 'DragonShield Card Manager export',
-      columns: {
-        name: 'Card Name',
-        quantity: 'Quantity',
-        set: 'Set Name',
-        setCode: 'Set Code',
-        number: 'Card Number',
-        condition: 'Condition',
-        language: 'Language',
-        foil: 'Printing',
-        price: 'Card Price'
-      }
+      description: 'DragonShield collection export',
+      headers: ['Quantity', 'Name', 'Set Name', 'Card Number', 'Printing', 'Language', 'Price']
     },
     tcgplayer: {
       name: 'TCGPlayer',
-      icon: '🎴',
-      description: 'TCGPlayer collection export',
-      columns: {
-        name: 'Name',
-        quantity: 'Quantity',
-        set: 'Set',
-        number: 'Number',
-        condition: 'Condition',
-        language: 'Language',
-        foil: 'Foil',
-        price: 'Market Price'
-      }
-    },
-    deckbox: {
-      name: 'Deckbox',
-      icon: '📦',
-      description: 'Deckbox.org CSV export',
-      columns: {
-        name: 'Name',
-        quantity: 'Count',
-        set: 'Edition',
-        number: 'Card Number',
-        condition: 'Condition',
-        language: 'Language',
-        foil: 'Foil',
-        price: 'Price'
-      }
+      description: 'TCGPlayer collection tracker',
+      headers: ['Product Name', 'Set Name', 'Product Line', 'Rarity', 'Number', 'Quantity', 'Foil']
     },
     moxfield: {
       name: 'Moxfield',
-      icon: '⚡',
       description: 'Moxfield collection export',
-      columns: {
-        name: 'Name',
-        quantity: 'Quantity',
-        set: 'Set',
-        setCode: 'Set Code',
-        number: 'Collector Number',
-        condition: 'Condition',
-        language: 'Language',
-        foil: 'Foil',
-        price: 'Purchase Price'
-      }
-    },
-    archidekt: {
-      name: 'Archidekt',
-      icon: '🏛️',
-      description: 'Archidekt collection export',
-      columns: {
-        name: 'Name',
-        quantity: 'Quantity',
-        set: 'Edition',
-        number: 'Collector Number',
-        condition: 'Condition',
-        foil: 'Foil'
-      }
-    },
-    tappedout: {
-      name: 'TappedOut',
-      icon: '🎯',
-      description: 'TappedOut inventory export',
-      columns: {
-        name: 'Name',
-        quantity: 'Qty',
-        set: 'Set',
-        foil: 'Foil'
-      }
-    },
-    mtggoldfish: {
-      name: 'MTGGoldfish',
-      icon: '🐠',
-      description: 'MTGGoldfish collection CSV',
-      columns: {
-        name: 'Card',
-        quantity: 'Quantity',
-        set: 'Set',
-        setCode: 'Set ID',
-        foil: 'Foil',
-        price: 'Price'
-      }
-    },
-    cardsphere: {
-      name: 'Cardsphere',
-      icon: '🌐',
-      description: 'Cardsphere have list',
-      columns: {
-        name: 'Name',
-        quantity: 'Quantity',
-        set: 'Edition',
-        condition: 'Condition',
-        foil: 'Foil'
-      }
-    },
-    echomtg: {
-      name: 'EchoMTG',
-      icon: '📊',
-      description: 'EchoMTG collection export',
-      columns: {
-        name: 'Name',
-        quantity: 'Quantity',
-        set: 'Set',
-        number: 'Number',
-        condition: 'Condition',
-        language: 'Language',
-        foil: 'Foil'
-      }
+      headers: ['Count', 'Name', 'Edition', 'Condition', 'Language', 'Foil', 'Tags', 'Price']
     },
     generic: {
       name: 'Generic CSV',
-      icon: '📄',
-      description: 'Custom CSV with flexible columns',
-      columns: {
-        name: ['Card Name', 'Name', 'Card'],
-        quantity: ['Quantity', 'Qty', 'Count', 'Amount'],
-        set: ['Set', 'Edition', 'Set Name'],
-        setCode: ['Set Code', 'Set ID'],
-        number: ['Collector Number', 'Card Number', 'Number', '#'],
-        condition: ['Condition', 'Grade'],
-        language: ['Language', 'Lang'],
-        foil: ['Foil', 'Finish', 'Printing'],
-        price: ['Price', 'Value', 'Cost']
-      }
+      description: 'Basic format with Name, Quantity, Set, Price',
+      headers: ['Name', 'Quantity', 'Set', 'Price', 'Condition', 'Foil']
     }
   };
 
-  // Parse CSV based on selected format
-  const parseCSVByFormat = (csvData, format) => {
-    const formatConfig = databaseFormats[format];
-    const cards = [];
+  const detectCSVFormat = (headers) => {
+    const headerStr = headers.map(h => h.toLowerCase()).join(',');
     
-    csvData.forEach(row => {
-      // Skip empty rows
+    if (headerStr.includes('card number') && headerStr.includes('printing')) {
+      return 'dragonshield';
+    } else if (headerStr.includes('product name') && headerStr.includes('product line')) {
+      return 'tcgplayer';
+    } else if (headerStr.includes('edition') && headerStr.includes('tags')) {
+      return 'moxfield';
+    }
+    
+    return 'generic';
+  };
+
+  const parseCSVByFormat = (data, format) => {
+    const cards = [];
+    let detectedFormat = format;
+
+    // Auto-detect format if needed
+    if (format === 'auto' && data.length > 0) {
+      const headers = Object.keys(data[0]);
+      detectedFormat = detectCSVFormat(headers);
+      console.log(`Auto-detected format: ${detectedFormat}`);
+      setImportStatus(`Detected ${csvFormats[detectedFormat].name} format`);
+    }
+
+    data.forEach((row, index) => {
       if (!row || Object.keys(row).length === 0) return;
-      
-      // Map columns based on format
-      const card = {};
-      
-      // Handle flexible column names for generic format
-      if (format === 'generic') {
-        // Name
-        const nameColumns = formatConfig.columns.name;
-        card.name = nameColumns.reduce((val, col) => val || row[col], '');
-        
-        // Quantity
-        const qtyColumns = formatConfig.columns.quantity;
-        card.quantity = parseInt(qtyColumns.reduce((val, col) => val || row[col], 1));
-        
-        // Set
-        const setColumns = formatConfig.columns.set;
-        card.set = setColumns.reduce((val, col) => val || row[col], '');
-        
-        // Other fields
-        const numberColumns = formatConfig.columns.number;
-        card.number = numberColumns.reduce((val, col) => val || row[col], '');
-        
-        const conditionColumns = formatConfig.columns.condition;
-        card.condition = conditionColumns.reduce((val, col) => val || row[col], 'NM');
-        
-        const foilColumns = formatConfig.columns.foil;
-        const foilValue = foilColumns.reduce((val, col) => val || row[col], '');
-        card.foil = foilValue && (foilValue.toLowerCase() === 'yes' || foilValue.toLowerCase() === 'foil' || foilValue === '1');
-        
-        const priceColumns = formatConfig.columns.price;
-        card.price = parseFloat(priceColumns.reduce((val, col) => val || row[col], 0));
-      } else {
-        // Standard format mapping
-        card.name = row[formatConfig.columns.name] || '';
-        card.quantity = parseInt(row[formatConfig.columns.quantity]) || 1;
-        card.set = row[formatConfig.columns.set] || '';
-        card.setCode = row[formatConfig.columns.setCode] || '';
-        card.number = row[formatConfig.columns.number] || '';
-        card.condition = row[formatConfig.columns.condition] || 'NM';
-        card.language = row[formatConfig.columns.language] || 'English';
-        
-        const foilValue = row[formatConfig.columns.foil];
-        card.foil = foilValue && (foilValue.toLowerCase() === 'yes' || foilValue.toLowerCase() === 'foil' || foilValue === '1');
-        
-        card.price = parseFloat(row[formatConfig.columns.price]) || 0;
-      }
-      
-      // Normalize condition codes
-      const conditionMap = {
-        'near mint': 'NM',
-        'nearmint': 'NM',
-        'mint': 'NM',
-        'nm': 'NM',
-        'lightly played': 'LP',
-        'lightlyplayed': 'LP',
-        'lp': 'LP',
-        'moderately played': 'MP',
-        'moderatelyplayed': 'MP',
-        'mp': 'MP',
-        'heavily played': 'HP',
-        'heavilyplayed': 'HP',
-        'hp': 'HP',
-        'damaged': 'DMG',
-        'dmg': 'DMG'
+
+      let card = {
+        id: `csv_${index}_${Date.now()}`,
+        source: csvFormats[detectedFormat].name,
+        original_data: row
       };
-      
-      const conditionLower = (card.condition || 'NM').toLowerCase();
-      card.condition = conditionMap[conditionLower] || 'NM';
-      
-      if (card.name) {
+
+      switch (detectedFormat) {
+        case 'dragonshield':
+          card.name = row['Name'] || row['Card Name'] || '';
+          card.quantity = parseInt(row['Quantity'] || row['Count'] || 1);
+          card.set = row['Set Name'] || row['Set'] || row['Edition'] || 'Unknown';
+          card.card_number = row['Card Number'] || row['Collector Number'] || '';
+          card.foil = (row['Printing'] || '').toLowerCase().includes('foil');
+          card.condition = row['Condition'] || defaultCondition;
+          card.price = parseFloat(row['Price'] || suggestedPrice);
+          card.language = row['Language'] || 'English';
+          break;
+
+        case 'tcgplayer':
+          card.name = row['Product Name'] || row['Name'] || '';
+          card.quantity = parseInt(row['Quantity'] || 1);
+          card.set = row['Set Name'] || row['Set'] || 'Unknown';
+          card.card_number = row['Number'] || '';
+          card.foil = row['Foil'] === 'Foil' || row['Foil'] === 'true';
+          card.condition = row['Condition'] || defaultCondition;
+          card.price = parseFloat(row['Price'] || row['Market Price'] || suggestedPrice);
+          card.rarity = row['Rarity'] || '';
+          break;
+
+        case 'moxfield':
+          card.name = row['Name'] || '';
+          card.quantity = parseInt(row['Count'] || row['Quantity'] || 1);
+          card.set = row['Edition'] || row['Set'] || 'Unknown';
+          card.condition = row['Condition'] || defaultCondition;
+          card.foil = row['Foil'] === 'foil' || row['Foil'] === 'true';
+          card.price = parseFloat(row['Price'] || suggestedPrice);
+          card.language = row['Language'] || 'English';
+          card.tags = row['Tags'] || '';
+          break;
+
+        case 'generic':
+        default:
+          // Flexible parsing for generic format
+          card.name = row['Name'] || row['Card Name'] || row['Card'] || 
+                     row['name'] || row['card_name'] || row['card'] || '';
+          card.quantity = parseInt(
+            row['Quantity'] || row['quantity'] || row['Qty'] || 
+            row['qty'] || row['Count'] || row['count'] || 1
+          );
+          card.set = row['Set'] || row['Set Name'] || row['set'] || 
+                    row['set_name'] || row['Edition'] || row['edition'] || 'Unknown';
+          card.condition = row['Condition'] || row['condition'] || defaultCondition;
+          card.price = parseFloat(
+            row['Price'] || row['price'] || row['Cost'] || 
+            row['cost'] || row['Value'] || row['value'] || suggestedPrice
+          );
+          card.foil = (row['Foil'] || row['foil'] || row['Finish'] || row['finish'] || '')
+                      .toLowerCase().includes('foil');
+          card.card_number = row['Number'] || row['Collector Number'] || 
+                            row['number'] || row['collector_number'] || '';
+          break;
+      }
+
+      // Only add cards with valid names
+      if (card.name && card.name.trim()) {
+        card.name = card.name.trim();
+        card.display_name = `${card.name} ${card.foil ? '(Foil)' : ''}`;
+        card.needs_verification = true;
         cards.push(card);
       }
     });
-    
+
     return cards;
   };
 
-  // Process imported cards
-  const processImportedCards = async (parsedCards) => {
-    setImporting(true);
-    const newCards = [];
-    const errors = [];
-    
-    for (const parsedCard of parsedCards) {
-      try {
-        // Try to fetch card data from API
-        const response = await fetch(`${API_URL}/cards/search?q=${encodeURIComponent(parsedCard.name)}&limit=1`);
-        const data = await response.json();
-        
-        if (data.cards && data.cards.length > 0) {
-          const apiCard = data.cards[0];
-          
-          newCards.push({
-            id: `card-${Date.now()}-${Math.random()}`,
-            card_name: parsedCard.name,
-            name: parsedCard.name,
-            scryfall_id: apiCard.id,
-            set_name: parsedCard.set || apiCard.set_name,
-            set_code: parsedCard.setCode || apiCard.setCode,
-            collector_number: parsedCard.number || apiCard.collector_number,
-            quantity: parsedCard.quantity || 1,
-            condition: parsedCard.condition || 'NM',
-            finish: parsedCard.foil ? 'foil' : 'nonfoil',
-            language: parsedCard.language || 'English',
-            suggestedPrice: parseFloat(apiCard.price || parsedCard.price || 0),
-            marketPrice: parseFloat(apiCard.price || 0),
-            userPrice: parsedCard.price || null,
-            image_url: apiCard.imageUrl,
-            selected: true
-          });
-        } else {
-          // Card not found in API, add with minimal data
-          newCards.push({
-            id: `card-${Date.now()}-${Math.random()}`,
-            card_name: parsedCard.name,
-            name: parsedCard.name,
-            scryfall_id: `import-${Date.now()}`,
-            set_name: parsedCard.set || 'Unknown',
-            set_code: parsedCard.setCode || '',
-            collector_number: parsedCard.number || '',
-            quantity: parsedCard.quantity || 1,
-            condition: parsedCard.condition || 'NM',
-            finish: parsedCard.foil ? 'foil' : 'nonfoil',
-            language: parsedCard.language || 'English',
-            suggestedPrice: parsedCard.price || 0,
-            userPrice: parsedCard.price || 0,
-            selected: true,
-            needsReview: true
-          });
-          
-          errors.push(`Could not find: ${parsedCard.name}`);
-        }
-      } catch (error) {
-        console.error(`Failed to process ${parsedCard.name}:`, error);
-        errors.push(`Error processing: ${parsedCard.name}`);
-      }
-    }
-    
-    setImporting(false);
-    
-    if (errors.length > 0 && errors.length < 10) {
-      showNotification(`Imported ${newCards.length} cards. ${errors.length} cards need review.`, 'info');
-    } else {
-      showNotification(`Successfully imported ${newCards.length} cards!`, 'success');
-    }
-    
-    onImportComplete(newCards);
-  };
-
-  // Handle CSV file upload
-  const handleCSVUpload = async (event) => {
+  const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (!file) return;
-    
-    setCsvFile(file);
-    
-    // Check if Papa Parse is available
-    let Papa;
-    try {
-      Papa = require('papaparse');
-    } catch (e) {
-      // Fallback to basic CSV parsing
-      const text = await file.text();
-      const lines = text.split('\n');
-      const headers = lines[0].split(',').map(h => h.trim());
-      const data = [];
-      
-      for (let i = 1; i < lines.length; i++) {
-        if (lines[i].trim()) {
-          const values = lines[i].split(',').map(v => v.trim());
-          const row = {};
-          headers.forEach((header, index) => {
-            row[header] = values[index] || '';
-          });
-          data.push(row);
-        }
-      }
-      
-      const cards = parseCSVByFormat(data, selectedFormat);
-      await processImportedCards(cards);
-      return;
-    }
-    
-    // Use Papa Parse if available
+
+    setIsProcessing(true);
+    setImportStatus('Reading CSV file...');
+    setFailedCards([]);
+    setDebugInfo(null);
+
     Papa.parse(file, {
       header: true,
+      skipEmptyLines: true,
       complete: async (results) => {
-        const cards = parseCSVByFormat(results.data, selectedFormat);
-        await processImportedCards(cards);
+        try {
+          // Debug information
+          if (results.data.length > 0) {
+            const headers = Object.keys(results.data[0]);
+            const debugData = {
+              headers: headers,
+              firstRow: results.data[0],
+              totalRows: results.data.length,
+              detectedFormat: selectedFormat === 'auto' ? detectCSVFormat(headers) : selectedFormat
+            };
+            setDebugInfo(debugData);
+            console.log('CSV Debug Info:', debugData);
+          }
+
+          const cards = parseCSVByFormat(results.data, selectedFormat);
+          
+          if (cards.length === 0) {
+            setImportStatus('No valid cards found in CSV. Check the format and try again.');
+            setIsProcessing(false);
+            return;
+          }
+
+          setImportedCards(cards);
+          setImportStatus(`Imported ${cards.length} cards. Fetching card details...`);
+          
+          // Fetch card details from Scryfall
+          await fetchCardDetails(cards);
+          
+        } catch (error) {
+          console.error('Import error:', error);
+          setImportStatus(`Error: ${error.message}`);
+        } finally {
+          setIsProcessing(false);
+        }
       },
       error: (error) => {
-        showNotification('Failed to parse CSV file', 'error');
         console.error('CSV parse error:', error);
+        setImportStatus(`Failed to parse CSV: ${error.message}`);
+        setIsProcessing(false);
       }
     });
   };
 
-  // Generate sample CSV template
-  const downloadTemplate = () => {
-    const format = databaseFormats[selectedFormat];
-    const headers = format.name === 'Generic CSV' 
-      ? ['Card Name', 'Quantity', 'Set', 'Condition', 'Foil', 'Price']
-      : Object.values(format.columns).filter(col => typeof col === 'string');
+  const fetchCardDetails = async (cards) => {
+    const results = {};
+    const failed = [];
+    let processed = 0;
+
+    for (const card of cards) {
+      try {
+        // Search for the card on Scryfall
+        const searchQuery = card.set && card.set !== 'Unknown' 
+          ? `"${card.name}" set:${card.set}`
+          : `"${card.name}"`;
+          
+        const response = await fetch(`/api/cards/search?q=${encodeURIComponent(searchQuery)}&limit=1`);
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.cards && data.cards.length > 0) {
+            const matchedCard = data.cards[0];
+            results[card.id] = {
+              ...card,
+              scryfall_id: matchedCard.id,
+              image_url: matchedCard.imageUrl,
+              set_name: matchedCard.set_name || card.set,
+              verified: true,
+              market_price: matchedCard.price
+            };
+          } else {
+            failed.push(card);
+          }
+        } else {
+          failed.push(card);
+        }
+        
+        processed++;
+        setImportStatus(`Processing cards: ${processed}/${cards.length}`);
+        
+        // Add a small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+      } catch (error) {
+        console.error(`Failed to fetch details for ${card.name}:`, error);
+        failed.push(card);
+      }
+    }
+
+    setSearchResults(results);
+    setFailedCards(failed);
     
-    const sampleData = [
-      headers.join(','),
-      '"Lightning Bolt",4,"Limited Edition Alpha","NM","No",25.00',
-      '"Black Lotus",1,"Limited Edition Beta","LP","No",45000.00',
-      '"Sol Ring",2,"Commander","NM","Yes",5.50'
-    ];
-    
-    const csvContent = sampleData.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
+    const successCount = Object.keys(results).length;
+    setImportStatus(
+      `Matched ${successCount} cards. ${failed.length > 0 ? `${failed.length} cards need manual review.` : ''}`
+    );
+  };
+
+  const handleImport = async () => {
+    const cardsToImport = [
+      ...Object.values(searchResults),
+      ...importedCards.filter(card => !searchResults[card.id])
+    ].map(card => ({
+      card_name: card.name,
+      set_name: card.set_name || card.set,
+      quantity: card.quantity,
+      price: parseFloat(card.price),
+      condition: card.condition,
+      finish: card.foil ? 'foil' : 'nonfoil',
+      scryfall_id: card.scryfall_id,
+      image_url: card.image_url,
+      description: `Imported from ${card.source}`
+    }));
+
+    if (cardsToImport.length === 0) {
+      setImportStatus('No cards to import');
+      return;
+    }
+
+    setIsProcessing(true);
+    setImportStatus('Creating listings...');
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/listings/bulk', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ listings: cardsToImport })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        setImportStatus(`Success! Created ${result.created} listings.`);
+        setTimeout(() => {
+          onImportComplete && onImportComplete(result);
+          onClose && onClose();
+        }, 2000);
+      } else {
+        setImportStatus(`Error: ${result.error}`);
+      }
+    } catch (error) {
+      setImportStatus(`Error: ${error.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const generateSampleCSV = (format) => {
+    const templates = {
+      dragonshield: 'Quantity,Name,Set Name,Card Number,Printing,Language,Price\n1,Lightning Bolt,Double Masters,001,Normal,English,5.00\n2,Sol Ring,Commander Legends,001,Foil,English,15.00',
+      tcgplayer: 'Product Name,Set Name,Quantity,Foil,Condition,Price\nLightning Bolt,Double Masters,1,Normal,NM,5.00\nSol Ring,Commander Legends,2,Foil,NM,15.00',
+      moxfield: 'Count,Name,Edition,Condition,Language,Foil,Price\n1,Lightning Bolt,Double Masters,NM,English,false,5.00\n2,Sol Ring,Commander Legends,NM,English,true,15.00',
+      generic: 'Name,Quantity,Set,Price,Condition,Foil\nLightning Bolt,1,Double Masters,5.00,NM,false\nSol Ring,2,Commander Legends,15.00,NM,true'
+    };
+
+    const csv = templates[format] || templates.generic;
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `mtg-import-template-${selectedFormat}.csv`;
+    a.download = `sample_${format}.csv`;
     a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
-    <div className="bg-white rounded-lg p-6 shadow-lg">
-      <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-        <Database size={20} />
-        Bulk Import Cards
-      </h3>
-      
-      {/* Database Format Selection */}
-      <div className="mb-4">
-        <label className="block text-sm font-medium mb-2">Select Your Card Database</label>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
-          {Object.entries(databaseFormats).map(([key, format]) => (
-            <button
-              key={key}
-              onClick={() => setSelectedFormat(key)}
-              className={`p-3 border rounded-lg text-center transition ${
-                selectedFormat === key 
-                  ? 'border-blue-500 bg-blue-50' 
-                  : 'border-gray-200 hover:bg-gray-50'
-              }`}
-            >
-              <div className="text-2xl mb-1">{format.icon}</div>
-              <div className="text-sm font-medium">{format.name}</div>
-            </button>
-          ))}
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b">
+          <h2 className="text-2xl font-bold">Bulk Import Cards</h2>
+          <p className="text-gray-600 mt-1">Import your collection from CSV files</p>
         </div>
-        <p className="text-xs text-gray-500 mt-2">
-          {databaseFormats[selectedFormat].description}
-        </p>
-      </div>
 
-      {/* Import Method Toggle */}
-      <div className="flex gap-2 mb-4">
-        <button
-          onClick={() => setImportMethod('text')}
-          className={`px-4 py-2 rounded-lg ${
-            importMethod === 'text' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'
-          }`}
-        >
-          Text List
-        </button>
-        <button
-          onClick={() => setImportMethod('csv')}
-          className={`px-4 py-2 rounded-lg ${
-            importMethod === 'csv' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'
-          }`}
-        >
-          CSV Upload
-        </button>
-      </div>
+        <div className="p-6 space-y-6">
+          {/* Format Selection */}
+          <div>
+            <label className="block text-sm font-medium mb-2">CSV Format</label>
+            <select
+              value={selectedFormat}
+              onChange={(e) => setSelectedFormat(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg"
+              disabled={isProcessing}
+            >
+              {Object.entries(csvFormats).map(([key, format]) => (
+                <option key={key} value={key}>
+                  {format.name} - {format.description}
+                </option>
+              ))}
+            </select>
+            
+            {selectedFormat !== 'auto' && (
+              <button
+                onClick={() => generateSampleCSV(selectedFormat)}
+                className="mt-2 text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1"
+              >
+                <Download className="w-4 h-4" />
+                Download sample {csvFormats[selectedFormat].name} CSV
+              </button>
+            )}
+          </div>
 
-      {importMethod === 'text' ? (
-        // Text Import
-        <>
-          <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">
-              Paste your card list
-            </label>
-            <textarea
-              value={bulkText}
-              onChange={(e) => setBulkText(e.target.value)}
-              className="w-full h-48 px-3 py-2 border rounded-lg font-mono text-sm"
-              placeholder="4x Lightning Bolt [LEA]
-2 Black Lotus
-Sol Ring [CMD]
-Birds of Paradise"
-            />
-            <div className="text-xs text-gray-500 mt-1">
-              Format: [quantity]x Card Name [SET] or just Card Name
+          {/* Default Settings */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Default Price (AUD)</label>
+              <input
+                type="number"
+                value={suggestedPrice}
+                onChange={(e) => setSuggestedPrice(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg"
+                step="0.01"
+                min="0"
+                disabled={isProcessing}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Default Condition</label>
+              <select
+                value={defaultCondition}
+                onChange={(e) => setDefaultCondition(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg"
+                disabled={isProcessing}
+              >
+                <option value="NM">Near Mint (NM)</option>
+                <option value="LP">Lightly Played (LP)</option>
+                <option value="MP">Moderately Played (MP)</option>
+                <option value="HP">Heavily Played (HP)</option>
+              </select>
             </div>
           </div>
-          
-          <button
-            onClick={async () => {
-              // Process text import
-              const lines = bulkText.trim().split('\n');
-              const cards = [];
-              
-              for (const line of lines) {
-                const match = line.match(/^(\d+)?\s*x?\s*(.+?)(?:\s*\[([A-Z0-9]+)\])?$/i);
-                if (match) {
-                  cards.push({
-                    name: match[2].trim(),
-                    quantity: parseInt(match[1]) || 1,
-                    setCode: match[3] || ''
-                  });
-                }
-              }
-              
-              await processImportedCards(cards);
-              setBulkText('');
-            }}
-            disabled={importing || !bulkText.trim()}
-            className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 flex items-center justify-center gap-2"
-          >
-            {importing ? (
-              <>
-                <Loader className="animate-spin" size={18} />
-                Importing...
-              </>
-            ) : (
-              <>
-                <FileUp size={18} />
-                Import Cards
-              </>
-            )}
-          </button>
-        </>
-      ) : (
-        // CSV Import
-        <>
-          <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">
-              Upload {databaseFormats[selectedFormat].name} Export
-            </label>
-            <input
-              type="file"
-              accept=".csv"
-              onChange={handleCSVUpload}
-              className="hidden"
-              id="csv-upload"
-            />
-            <label
-              htmlFor="csv-upload"
-              className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:bg-gray-50 block"
-            >
-              <FileUp className="mx-auto mb-2 text-gray-400" size={32} />
-              <p className="text-sm text-gray-600">
-                {csvFile ? csvFile.name : `Click to upload ${databaseFormats[selectedFormat].name} CSV`}
-              </p>
-              <p className="text-xs text-gray-500 mt-2">
-                Supported formats: CSV exports from {databaseFormats[selectedFormat].name}
-              </p>
-            </label>
-          </div>
 
-          {/* Template Download */}
-          <div className="p-3 bg-blue-50 rounded-lg mb-4">
-            <div className="flex items-start gap-2">
-              <Info className="text-blue-600 mt-0.5" size={16} />
-              <div className="flex-1">
-                <p className="text-sm text-blue-800 font-medium">Need a template?</p>
-                <p className="text-xs text-blue-700 mt-1">
-                  Download a sample CSV file formatted for {databaseFormats[selectedFormat].name}
-                </p>
-                <button
-                  onClick={downloadTemplate}
-                  className="text-xs text-blue-600 hover:text-blue-800 underline mt-2 flex items-center gap-1"
-                >
-                  <Download size={12} />
-                  Download CSV Template
-                </button>
+          {/* File Upload */}
+          <div className="border-2 border-dashed border-gray-300 rounded-lg p-8">
+            <div className="text-center">
+              <Upload className="mx-auto h-12 w-12 text-gray-400" />
+              <div className="mt-4">
+                <label htmlFor="file-upload" className="cursor-pointer">
+                  <span className="mt-2 block text-sm font-medium text-gray-900">
+                    Click to upload CSV file
+                  </span>
+                  <input
+                    id="file-upload"
+                    name="file-upload"
+                    type="file"
+                    className="sr-only"
+                    accept=".csv"
+                    onChange={handleFileUpload}
+                    disabled={isProcessing}
+                  />
+                </label>
               </div>
             </div>
           </div>
 
-          {/* Format Help */}
-          <button
-            onClick={() => setShowFormatHelp(!showFormatHelp)}
-            className="text-sm text-gray-600 hover:text-gray-800 flex items-center gap-1 mb-4"
-          >
-            <Info size={14} />
-            Column mapping for {databaseFormats[selectedFormat].name}
-            <ChevronDown size={14} className={`transform transition ${showFormatHelp ? 'rotate-180' : ''}`} />
-          </button>
-          
-          {showFormatHelp && (
-            <div className="mb-4 p-3 bg-gray-50 rounded-lg text-xs">
-              <p className="font-medium mb-2">Expected columns:</p>
-              <ul className="space-y-1">
-                {Object.entries(databaseFormats[selectedFormat].columns).map(([key, col]) => (
-                  <li key={key}>
-                    • <span className="font-medium">{key}:</span> {Array.isArray(col) ? col.join(' or ') : col}
-                  </li>
-                ))}
-              </ul>
+          {/* Debug Info */}
+          {debugInfo && (
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h3 className="font-medium mb-2">Debug Information</h3>
+              <div className="text-sm space-y-1">
+                <p>Detected Format: <span className="font-mono">{debugInfo.detectedFormat}</span></p>
+                <p>Total Rows: {debugInfo.totalRows}</p>
+                <p>Headers: <span className="font-mono text-xs">{debugInfo.headers.join(', ')}</span></p>
+              </div>
             </div>
           )}
-        </>
-      )}
+
+          {/* Status */}
+          {importStatus && (
+            <div className={`p-4 rounded-lg flex items-start gap-2 ${
+              importStatus.includes('Error') ? 'bg-red-50 text-red-800' : 
+              importStatus.includes('Success') ? 'bg-green-50 text-green-800' : 
+              'bg-blue-50 text-blue-800'
+            }`}>
+              {importStatus.includes('Error') ? <AlertCircle className="w-5 h-5 mt-0.5" /> :
+               importStatus.includes('Success') ? <CheckCircle className="w-5 h-5 mt-0.5" /> :
+               <Package className="w-5 h-5 mt-0.5" />}
+              <span>{importStatus}</span>
+            </div>
+          )}
+
+          {/* Imported Cards Summary */}
+          {importedCards.length > 0 && (
+            <div className="border rounded-lg p-4">
+              <h3 className="font-medium mb-3">Imported Cards ({importedCards.length})</h3>
+              <div className="max-h-60 overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-2 py-1 text-left">Name</th>
+                      <th className="px-2 py-1 text-left">Set</th>
+                      <th className="px-2 py-1 text-center">Qty</th>
+                      <th className="px-2 py-1 text-right">Price</th>
+                      <th className="px-2 py-1 text-center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importedCards.slice(0, 50).map((card) => (
+                      <tr key={card.id} className="border-t">
+                        <td className="px-2 py-1">{card.display_name}</td>
+                        <td className="px-2 py-1">{card.set}</td>
+                        <td className="px-2 py-1 text-center">{card.quantity}</td>
+                        <td className="px-2 py-1 text-right">${card.price.toFixed(2)}</td>
+                        <td className="px-2 py-1 text-center">
+                          {searchResults[card.id] ? (
+                            <span className="text-green-600">✓</span>
+                          ) : failedCards.includes(card) ? (
+                            <span className="text-red-600">✗</span>
+                          ) : (
+                            <span className="text-gray-400">...</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {importedCards.length > 50 && (
+                  <p className="text-sm text-gray-500 mt-2">
+                    And {importedCards.length - 50} more...
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Failed Cards */}
+          {failedCards.length > 0 && (
+            <div className="border border-red-200 rounded-lg p-4 bg-red-50">
+              <h3 className="font-medium text-red-800 mb-2">
+                Cards Not Found ({failedCards.length})
+              </h3>
+              <p className="text-sm text-red-600 mb-2">
+                These cards couldn't be matched automatically and will be imported with basic details:
+              </p>
+              <div className="text-sm space-y-1 max-h-32 overflow-y-auto">
+                {failedCards.map(card => (
+                  <div key={card.id} className="text-red-700">
+                    • {card.name} ({card.set})
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="p-6 border-t flex justify-between">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+            disabled={isProcessing}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleImport}
+            disabled={isProcessing || importedCards.length === 0}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isProcessing ? 'Processing...' : `Import ${importedCards.length} Cards`}
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
 
-export default BulkImporter;
+export default BulkImport;

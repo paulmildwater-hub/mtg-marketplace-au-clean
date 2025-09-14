@@ -63,7 +63,7 @@ app.use((req, res, next) => {
 // Rate limiting
 const paymentLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: 50, // Increased from 5
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
@@ -73,7 +73,7 @@ const paymentLimiter = rateLimit({
 
 const apiLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 100,
+  max: 1000, // Increased from 100 for development
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {

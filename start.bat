@@ -1,0 +1,6 @@
+@echo off
+echo 🚀 Starting MTG Australia Marketplace...
+echo Opening http://localhost:3000 in your browser...
+timeout /t 3 /nobreak >nul
+start http://localhost:3000
+call npm start

@@ -61,16 +61,24 @@ app.use((req, res, next) => {
 });
 
 // Rate limiting
-const paymentLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  message: 'Too many payment attempts, please try again later'
-});
-
 const apiLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
   max: 100,
-  message: 'Too many requests, please try again later'
+  handler: (req, res) => {
+    res.status(429).json({ 
+      error: 'Too many requests, please try again later' 
+    });
+  }
+});
+
+const paymentLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  handler: (req, res) => {
+    res.status(429).json({ 
+      error: 'Too many payment attempts, please try again later' 
+    });
+  }
 });
 
 app.use('/api/payment', paymentLimiter);

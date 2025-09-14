@@ -46,3 +46,10 @@ If you encounter issues:
 ---
 
 **Built with ❤️ for the Australian MTG community**
+
+# Add a test line to your README
+echo "" >> README.md
+echo "Test push after cleanup - $(Get-Date)" >> README.md
+
+# Check what will be committed
+git status
